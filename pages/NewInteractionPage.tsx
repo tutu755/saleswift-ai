@@ -19,8 +19,9 @@ import {
   ChevronLeft,
   Search
 } from 'lucide-react';
-import { analyzeSalesInteraction, parseCustomerVoiceInput } from '../services/geminiService';
+import { analyzeSalesInteraction, parseCustomerVoiceInput, transcribeAudio } from '../services/geminiService';
 import { Interaction, Customer } from '../types';
+import { useAudioRecorder, blobToBase64 } from '../hooks/useAudioRecorder';
 
 interface Props {
   onSave: (interaction: Interaction) => void;
@@ -32,7 +33,6 @@ const NewInteractionPage: React.FC<Props> = ({ onSave, customers, onAddCustomer 
   const [input, setInput] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [recording, setRecording] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   
   // 弹窗状态
@@ -48,6 +48,9 @@ const NewInteractionPage: React.FC<Props> = ({ onSave, customers, onAddCustomer 
   const [selectedFile, setSelectedFile] = useState<{ file: File, base64: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+  
+  // 使用录音 Hook
+  const { isRecording, startRecording, stopRecording, error: recordError } = useAudioRecorder();
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -152,34 +155,68 @@ const NewInteractionPage: React.FC<Props> = ({ onSave, customers, onAddCustomer 
     }
   };
 
-  const startQuickVoiceInput = () => {
-    setRecording(true);
-    setTimeout(async () => {
-      setRecording(false);
+  // 处理实时录音转文字（用于主要互动记录）
+  const handleMainRecording = async () => {
+    if (isRecording) {
+      // 停止录音并转录
       setIsVoiceProcessing(true);
       try {
-        const mockSpeech = "这位客户叫张经理，是阿里巴巴的资深采购。";
-        const result = await parseCustomerVoiceInput(mockSpeech);
-        if (result) {
-          setNewCustomerData(prev => ({
-            ...prev,
-            name: result.name || prev.name,
-            company: result.company || prev.company,
-            role: result.role || prev.role,
-            industry: result.industry || prev.industry
-          }));
-          const fields = [];
-          if (result.name) fields.push('name');
-          if (result.company) fields.push('company');
-          setHighlightedFields(fields);
-          setTimeout(() => setHighlightedFields([]), 2000);
+        const audioBlob = await stopRecording();
+        if (audioBlob) {
+          const base64data = await blobToBase64(audioBlob);
+          const transcribedText = await transcribeAudio(base64data, 'audio/webm;codecs=opus');
+          setInput(prev => prev ? `${prev}\n${transcribedText}` : transcribedText);
         }
       } catch (err) {
-        console.error(err);
+        setError('语音转录失败，请重试');
+        console.error('转录失败:', err);
       } finally {
         setIsVoiceProcessing(false);
       }
-    }, 2500);
+    } else {
+      // 开始录音
+      try {
+        await startRecording();
+      } catch (err) {
+        setError('无法访问麦克风，请检查权限');
+      }
+    }
+  };
+
+  // 快速语音输入客户信息
+  const startQuickVoiceInput = async () => {
+    setIsVoiceProcessing(true);
+    try {
+      await startRecording();
+      // 等待用户说话（可以设置一个定时器或让用户手动停止）
+      setTimeout(async () => {
+        const audioBlob = await stopRecording();
+        if (audioBlob) {
+          const base64data = await blobToBase64(audioBlob);
+          const transcribedText = await transcribeAudio(base64data, 'audio/webm;codecs=opus');
+          const result = await parseCustomerVoiceInput(transcribedText);
+          if (result) {
+            setNewCustomerData(prev => ({
+              ...prev,
+              name: result.name || prev.name,
+              company: result.company || prev.company,
+              role: result.role || prev.role,
+              industry: result.industry || prev.industry
+            }));
+            const fields = [];
+            if (result.name) fields.push('name');
+            if (result.company) fields.push('company');
+            setHighlightedFields(fields);
+            setTimeout(() => setHighlightedFields([]), 2000);
+          }
+        }
+      }, 3000); // 3秒后自动停止
+    } catch (err) {
+      console.error('语音输入失败:', err);
+      setError('语音输入失败');
+    } finally {
+      setIsVoiceProcessing(false);
+    }
   };
 
   const handleConfirmCreateAndSave = (e: React.FormEvent) => {
@@ -236,14 +273,16 @@ const NewInteractionPage: React.FC<Props> = ({ onSave, customers, onAddCustomer 
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             <button 
-              onClick={() => setRecording(!recording)}
-              disabled={isAnalyzing}
+              onClick={handleMainRecording}
+              disabled={isAnalyzing || isVoiceProcessing}
               className={`flex items-center justify-center gap-3 py-6 rounded-2xl border-2 transition-all ${
-                recording ? 'border-red-200 bg-red-50 text-red-600 animate-pulse' : 'border-gray-100 bg-gray-50 text-gray-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600'
-              }`}
+                isRecording ? 'border-red-200 bg-red-50 text-red-600 animate-pulse' : 'border-gray-100 bg-gray-50 text-gray-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600'
+              } ${isAnalyzing || isVoiceProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
-              <Mic size={24} />
-              <span className="font-bold text-lg">{recording ? '正在聆听...' : '语音录入纪要'}</span>
+              {isRecording ? <X size={24} /> : <Mic size={24} />}
+              <span className="font-bold text-lg">
+                {isRecording ? '点击停止录音' : isVoiceProcessing ? '正在转录...' : '语音录入纪要'}
+              </span>
             </button>
             <button 
               onClick={() => fileInputRef.current?.click()}

@@ -18,7 +18,8 @@ import {
   X,
   ChevronRight
 } from 'lucide-react';
-import { parseScheduleVoice } from '../services/geminiService';
+import { parseScheduleVoice, transcribeAudio } from '../services/geminiService';
+import { useAudioRecorder, blobToBase64 } from '../hooks/useAudioRecorder';
 
 interface Props {
   schedules: Schedule[];
@@ -28,46 +29,58 @@ interface Props {
 }
 
 const SchedulePage: React.FC<Props> = ({ schedules, customers, onAddSchedule, onToggleStatus }) => {
-  const [recording, setRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newSchedule, setNewSchedule] = useState({ title: '', date: '', time: '', customerId: '' });
+  
+  // 使用录音 Hook
+  const { isRecording, startRecording, stopRecording } = useAudioRecorder();
 
   const sortedSchedules = [...schedules].sort((a, b) => 
     new Date(`${a.date} ${a.time || '00:00'}`).getTime() - new Date(`${b.date} ${b.time || '00:00'}`).getTime()
   );
 
-  const startVoiceInput = () => {
-    setRecording(true);
-    setTimeout(async () => {
-      setRecording(false);
+  const startVoiceInput = async () => {
+    if (isRecording) {
+      // 停止录音并处理
       setIsProcessing(true);
       try {
-        const mockSpeech = "明天下午两点去拜访阿里巴巴的张经理";
-        const result = await parseScheduleVoice(mockSpeech);
-        if (result) {
-          // 尝试匹配客户
-          const matchedCust = customers.find(c => 
-            c.name.includes(result.customerName) || c.company.includes(result.customerName)
-          );
-          
-          const schedule: Schedule = {
-            id: 'sched-' + Date.now(),
-            title: result.title,
-            date: result.date,
-            time: result.time,
-            description: result.description,
-            customerId: matchedCust?.id,
-            status: 'pending'
-          };
-          onAddSchedule(schedule);
+        const audioBlob = await stopRecording();
+        if (audioBlob) {
+          const base64data = await blobToBase64(audioBlob);
+          const transcribedText = await transcribeAudio(base64data, 'audio/webm;codecs=opus');
+          const result = await parseScheduleVoice(transcribedText);
+          if (result) {
+            // 尝试匹配客户
+            const matchedCust = customers.find(c => 
+              c.name.includes(result.customerName) || c.company.includes(result.customerName)
+            );
+            
+            const schedule: Schedule = {
+              id: 'sched-' + Date.now(),
+              title: result.title,
+              date: result.date,
+              time: result.time,
+              description: result.description,
+              customerId: matchedCust?.id,
+              status: 'pending'
+            };
+            onAddSchedule(schedule);
+          }
         }
       } catch (err) {
-        console.error(err);
+        console.error('语音处理失败:', err);
       } finally {
         setIsProcessing(false);
       }
-    }, 2000);
+    } else {
+      // 开始录音
+      try {
+        await startRecording();
+      } catch (err) {
+        console.error('无法启动录音:', err);
+      }
+    }
   };
 
   const handleManualAdd = (e: React.FormEvent) => {
@@ -112,13 +125,13 @@ const SchedulePage: React.FC<Props> = ({ schedules, customers, onAddSchedule, on
             </div>
             <button 
               onClick={startVoiceInput}
-              disabled={recording || isProcessing}
+              disabled={isProcessing}
               className={`flex items-center gap-3 px-6 py-3 rounded-2xl font-bold transition-all ${
-                recording ? 'bg-red-500 text-white animate-pulse' : 'bg-blue-600 text-white hover:bg-blue-700'
-              }`}
+                isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-blue-600 text-white hover:bg-blue-700'
+              } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
-              {isProcessing ? <Loader2 className="animate-spin" size={20} /> : <Mic size={20} />}
-              {recording ? '正在记录...' : '开始说话'}
+              {isProcessing ? <Loader2 className="animate-spin" size={20} /> : isRecording ? <X size={20} /> : <Mic size={20} />}
+              {isProcessing ? '正在处理...' : isRecording ? '点击停止' : '开始说话'}
             </button>
           </div>
 
