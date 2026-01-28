@@ -2,7 +2,8 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Interaction, Customer, RolePlayEvaluation } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY || '';
+const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
 const EVALUATION_SCHEMA = {
   type: Type.OBJECT,
@@ -36,6 +37,7 @@ const EVALUATION_SCHEMA = {
 };
 
 export const startRolePlayChat = (customer: Customer, context: string) => {
+  if (!ai) throw new Error('API key not configured');
   const model = "gemini-3-flash-preview";
   const systemInstruction = `
     你现在扮演客户：${customer.name}，职位是 ${customer.role}，在 ${customer.company} 工作。
@@ -43,7 +45,7 @@ export const startRolePlayChat = (customer: Customer, context: string) => {
     演练目标：用户（销售）需要说服你考虑他们的方案或达成下一步共识。
 
     行为准则：
-    1. **拒绝敷衍**：如果用户回复过于简短（如少于10个字）或缺乏专业性，请表现出不悦或困惑，例如：“我没太听懂你的意思，这就是你的专业水平吗？”
+    1. **拒绝敷衍**：如果用户回复过于简短（如少于10个字）或缺乏专业性，请表现出不悦或困惑，例如："我没太听懂你的意思，这就是你的专业水平吗？"
     2. **真实反馈**：模拟真实的商业阻力。如果你觉得销售没有触及你的痛点，不要轻易妥协。
     3. **引导深度对话**：通过追问来测试用户的需求挖掘能力。
     
@@ -56,6 +58,7 @@ export const startRolePlayChat = (customer: Customer, context: string) => {
 };
 
 export const transcribeAudio = async (base64Data: string, mimeType: string): Promise<string> => {
+  if (!ai) throw new Error('API key not configured');
   const model = "gemini-3-flash-preview";
   const prompt = "请准确转录这段销售人员的语音内容。只需返回转录文本。";
   const response = await ai.models.generateContent({
@@ -71,6 +74,7 @@ export const transcribeAudio = async (base64Data: string, mimeType: string): Pro
 };
 
 export const evaluateRolePlay = async (history: { role: string, text: string }[]): Promise<RolePlayEvaluation> => {
+  if (!ai) throw new Error('API key not configured');
   const model = "gemini-3-pro-preview";
   const content = history.map(h => `${h.role === 'user' ? '销售' : '客户'}: ${h.text}`).join('\n');
   
@@ -80,7 +84,7 @@ export const evaluateRolePlay = async (history: { role: string, text: string }[]
     评估准则（必须严格遵守）：
     1. **识别敷衍**：如果销售人员的回复普遍偏短（例如大多在15字以内）或只是简单的礼貌性回复，总分禁止超过 40 分。
     2. **专业度考核**：检查销售是否使用了诸如 SPIN、利益点转化、同理心倾听等技巧。
-    3. **扣分项**：对于缺乏内容、回答敷衍、态度不积极的情况，必须在“改进建议”中直接批评。
+    3. **扣分项**：对于缺乏内容、回答敷衍、态度不积极的情况，必须在"改进建议"中直接批评。
     4. **真实性**：不需要为了鼓励而给高分，我们要的是真实的反馈。
 
     对话记录：\n${content}
@@ -96,6 +100,7 @@ export const evaluateRolePlay = async (history: { role: string, text: string }[]
 
 // ... (remaining existing analytical functions)
 export const analyzeSalesInteraction = async (input: string, audioData?: { data: string, mimeType: string }) => {
+  if (!ai) throw new Error('API key not configured');
   const model = "gemini-3-flash-preview";
   const systemInstruction = "你是一位销售分析师。将语音或文本转化为结构化销售报告。务必提供详细的摘要和具体的下一步行动建议。";
   const parts: any[] = [{ text: input || "分析此次互动" }];
@@ -157,9 +162,10 @@ export const analyzeSalesInteraction = async (input: string, audioData?: { data:
 };
 
 export const parseScheduleVoice = async (text: string): Promise<any> => {
+  if (!ai) throw new Error('API key not configured');
   const model = "gemini-3-flash-preview";
   const systemInstruction = `你是一个日程助理。从用户的描述中提取日程信息。当前日期是 ${new Date().toISOString().split('T')[0]}。
-  如果用户说“明天”，请计算具体日期。`;
+  如果用户说"明天"，请计算具体日期。`;
   const response = await ai.models.generateContent({
     model,
     contents: `提取此日程: "${text}"`,
@@ -179,6 +185,7 @@ export const parseScheduleVoice = async (text: string): Promise<any> => {
 };
 
 export const extractSearchKeywords = async (text: string): Promise<string> => {
+  if (!ai) throw new Error('API key not configured');
   const model = "gemini-3-flash-preview";
   const response = await ai.models.generateContent({
     model,
@@ -188,6 +195,7 @@ export const extractSearchKeywords = async (text: string): Promise<string> => {
 };
 
 export const parseCustomerVoiceInput = async (text: string) => {
+  if (!ai) throw new Error('API key not configured');
   const model = "gemini-3-flash-preview";
   const systemInstruction = "提取客户姓名、公司、职位、行业。";
   const response = await ai.models.generateContent({
