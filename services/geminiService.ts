@@ -38,7 +38,7 @@ const EVALUATION_SCHEMA = {
 
 export const startRolePlayChat = (customer: Customer, context: string) => {
   if (!ai) throw new Error('API key not configured');
-  const model = "gemini-3-flash-preview";
+  const model = "gemini-1.5-flash";
   const systemInstruction = `
     你现在扮演客户：${customer.name}，职位是 ${customer.role}，在 ${customer.company} 工作。
     性格特征：资深、理性、时间观念极强。
@@ -59,7 +59,7 @@ export const startRolePlayChat = (customer: Customer, context: string) => {
 
 export const transcribeAudio = async (base64Data: string, mimeType: string): Promise<string> => {
   if (!ai) throw new Error('API key not configured');
-  const model = "gemini-3-flash-preview";
+  const model = "gemini-1.5-flash";
   const prompt = "请准确转录这段销售人员的语音内容。只需返回转录文本。";
   const response = await ai.models.generateContent({
     model,
@@ -75,7 +75,7 @@ export const transcribeAudio = async (base64Data: string, mimeType: string): Pro
 
 export const evaluateRolePlay = async (history: { role: string, text: string }[]): Promise<RolePlayEvaluation> => {
   if (!ai) throw new Error('API key not configured');
-  const model = "gemini-3-pro-preview";
+  const model = "gemini-1.5-pro";
   const content = history.map(h => `${h.role === 'user' ? '销售' : '客户'}: ${h.text}`).join('\n');
   
   const prompt = `
@@ -101,7 +101,7 @@ export const evaluateRolePlay = async (history: { role: string, text: string }[]
 // ... (remaining existing analytical functions)
 export const analyzeSalesInteraction = async (input: string, audioData?: { data: string, mimeType: string }) => {
   if (!ai) throw new Error('API key not configured');
-  const model = "gemini-3-flash-preview";
+  const model = "gemini-1.5-flash";
   const systemInstruction = "你是一位销售分析师。将语音或文本转化为结构化销售报告。务必提供详细的摘要和具体的下一步行动建议。";
   const parts: any[] = [{ text: input || "分析此次互动" }];
   if (audioData) parts.push({ inlineData: audioData });
@@ -163,7 +163,7 @@ export const analyzeSalesInteraction = async (input: string, audioData?: { data:
 
 export const parseScheduleVoice = async (text: string): Promise<any> => {
   if (!ai) throw new Error('API key not configured');
-  const model = "gemini-3-flash-preview";
+  const model = "gemini-1.5-flash";
   const systemInstruction = `你是一个日程助理。从用户的描述中提取日程信息。当前日期是 ${new Date().toISOString().split('T')[0]}。
   如果用户说"明天"，请计算具体日期。`;
   const response = await ai.models.generateContent({
@@ -186,7 +186,7 @@ export const parseScheduleVoice = async (text: string): Promise<any> => {
 
 export const extractSearchKeywords = async (text: string): Promise<string> => {
   if (!ai) throw new Error('API key not configured');
-  const model = "gemini-3-flash-preview";
+  const model = "gemini-1.5-flash";
   const response = await ai.models.generateContent({
     model,
     contents: `从以下语音中提取搜索关键词（如人名、公司）："${text}"。只返回关键词，不要其他描述。`,
@@ -196,7 +196,7 @@ export const extractSearchKeywords = async (text: string): Promise<string> => {
 
 export const parseCustomerVoiceInput = async (text: string) => {
   if (!ai) throw new Error('API key not configured');
-  const model = "gemini-3-flash-preview";
+  const model = "gemini-1.5-flash";
   const systemInstruction = "提取客户姓名、公司、职位、行业。";
   const response = await ai.models.generateContent({
     model,
