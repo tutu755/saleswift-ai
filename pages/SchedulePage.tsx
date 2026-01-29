@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { parseScheduleVoice, transcribeAudio } from '../services/geminiService';
 import { useAudioRecorder, blobToBase64 } from '../hooks/useAudioRecorder';
+import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 
 interface Props {
   schedules: Schedule[];
@@ -33,14 +34,66 @@ const SchedulePage: React.FC<Props> = ({ schedules, customers, onAddSchedule, on
   const [showAddForm, setShowAddForm] = useState(false);
   const [newSchedule, setNewSchedule] = useState({ title: '', date: '', time: '', customerId: '' });
   
-  // 使用录音 Hook
+  // 使用录音 Hook（MediaRecorder + Gemini API）
   const { isRecording, startRecording, stopRecording } = useAudioRecorder();
+  
+  // 使用免费的 Web Speech API（浏览器内置，无需 API Key）
+  const { 
+    isListening, 
+    transcript, 
+    startListening, 
+    stopListening,
+    isSupported: isSpeechSupported 
+  } = useSpeechRecognition();
+  
+  // 优先使用 Web Speech API（如果支持）
+  const isCurrentlyRecording = isSpeechSupported ? isListening : isRecording;
 
   const sortedSchedules = [...schedules].sort((a, b) => 
     new Date(`${a.date} ${a.time || '00:00'}`).getTime() - new Date(`${b.date} ${b.time || '00:00'}`).getTime()
   );
 
   const startVoiceInput = async () => {
+    // 优先使用 Web Speech API（免费，无需 API Key）
+    if (isSpeechSupported) {
+      if (isListening) {
+        // 停止监听并处理识别的文本
+        stopListening();
+        if (transcript) {
+          setIsProcessing(true);
+          try {
+            const result = await parseScheduleVoice(transcript);
+            if (result) {
+              // 尝试匹配客户
+              const matchedCust = customers.find(c => 
+                c.name.includes(result.customerName) || c.company.includes(result.customerName)
+              );
+              
+              const schedule: Schedule = {
+                id: 'sched-' + Date.now(),
+                title: result.title,
+                date: result.date,
+                time: result.time,
+                description: result.description,
+                customerId: matchedCust?.id,
+                status: 'pending'
+              };
+              onAddSchedule(schedule);
+            }
+          } catch (err) {
+            console.error('语音处理失败:', err);
+          } finally {
+            setIsProcessing(false);
+          }
+        }
+      } else {
+        // 开始监听
+        startListening();
+      }
+      return;
+    }
+    
+    // 降级到 MediaRecorder + Gemini API（需要 API Key）
     if (isRecording) {
       // 停止录音并处理
       setIsProcessing(true);
@@ -123,16 +176,21 @@ const SchedulePage: React.FC<Props> = ({ schedules, customers, onAddSchedule, on
                 <p className="text-sm text-gray-500">只需说出“明天下午两点和张总开会”</p>
               </div>
             </div>
-            <button 
-              onClick={startVoiceInput}
-              disabled={isProcessing}
-              className={`flex items-center gap-3 px-6 py-3 rounded-2xl font-bold transition-all ${
-                isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-blue-600 text-white hover:bg-blue-700'
-              } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
-            >
-              {isProcessing ? <Loader2 className="animate-spin" size={20} /> : isRecording ? <X size={20} /> : <Mic size={20} />}
-              {isProcessing ? '正在处理...' : isRecording ? '点击停止' : '开始说话'}
-            </button>
+            <div className="flex flex-col items-end gap-2">
+              <button 
+                onClick={startVoiceInput}
+                disabled={isProcessing}
+                className={`flex items-center gap-3 px-6 py-3 rounded-2xl font-bold transition-all ${
+                  isCurrentlyRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-blue-600 text-white hover:bg-blue-700'
+                } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                {isProcessing ? <Loader2 className="animate-spin" size={20} /> : isCurrentlyRecording ? <X size={20} /> : <Mic size={20} />}
+                {isProcessing ? '正在处理...' : isCurrentlyRecording ? '点击停止' : '开始说话'}
+              </button>
+              {isSpeechSupported && !isCurrentlyRecording && (
+                <span className="text-xs text-green-600 font-medium">✓ 免费语音识别</span>
+              )}
+            </div>
           </div>
 
           <div className="space-y-4">
