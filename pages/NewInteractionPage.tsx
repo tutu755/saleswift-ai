@@ -22,6 +22,7 @@ import {
 import { analyzeSalesInteraction, parseCustomerVoiceInput, transcribeAudio } from '../services/geminiService';
 import { Interaction, Customer } from '../types';
 import { useAudioRecorder, blobToBase64 } from '../hooks/useAudioRecorder';
+import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 
 interface Props {
   onSave: (interaction: Interaction) => void;
@@ -49,8 +50,20 @@ const NewInteractionPage: React.FC<Props> = ({ onSave, customers, onAddCustomer 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   
-  // 使用录音 Hook
+  // 使用录音 Hook（MediaRecorder + Gemini API）
   const { isRecording, startRecording, stopRecording, error: recordError } = useAudioRecorder();
+  
+  // 使用免费的 Web Speech API（浏览器内置，无需 API Key）
+  const { 
+    isListening, 
+    transcript, 
+    startListening, 
+    stopListening,
+    isSupported: isSpeechSupported 
+  } = useSpeechRecognition();
+  
+  // 优先使用 Web Speech API（如果支持）
+  const isCurrentlyRecording = isSpeechSupported ? isListening : isRecording;
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -157,6 +170,21 @@ const NewInteractionPage: React.FC<Props> = ({ onSave, customers, onAddCustomer 
 
   // 处理实时录音转文字（用于主要互动记录）
   const handleMainRecording = async () => {
+    // 优先使用 Web Speech API（免费，无需 API Key）
+    if (isSpeechSupported) {
+      if (isListening) {
+        stopListening();
+        // 将识别的文本添加到输入框
+        if (transcript) {
+          setInput(prev => prev ? `${prev}\n${transcript}` : transcript);
+        }
+      } else {
+        startListening();
+      }
+      return;
+    }
+    
+    // 降级到 MediaRecorder + Gemini API（需要 API Key）
     if (isRecording) {
       // 停止录音并转录
       setIsVoiceProcessing(true);
@@ -168,7 +196,7 @@ const NewInteractionPage: React.FC<Props> = ({ onSave, customers, onAddCustomer 
           setInput(prev => prev ? `${prev}\n${transcribedText}` : transcribedText);
         }
       } catch (err) {
-        setError('语音转录失败，请重试');
+        setError('语音转录失败。提示：您可以使用 Chrome/Edge 浏览器获得免费的语音识别功能');
         console.error('转录失败:', err);
       } finally {
         setIsVoiceProcessing(false);
@@ -275,14 +303,19 @@ const NewInteractionPage: React.FC<Props> = ({ onSave, customers, onAddCustomer 
             <button 
               onClick={handleMainRecording}
               disabled={isAnalyzing || isVoiceProcessing}
-              className={`flex items-center justify-center gap-3 py-6 rounded-2xl border-2 transition-all ${
-                isRecording ? 'border-red-200 bg-red-50 text-red-600 animate-pulse' : 'border-gray-100 bg-gray-50 text-gray-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600'
+              className={`flex flex-col items-center justify-center gap-2 py-6 rounded-2xl border-2 transition-all ${
+                isCurrentlyRecording ? 'border-red-200 bg-red-50 text-red-600 animate-pulse' : 'border-gray-100 bg-gray-50 text-gray-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600'
               } ${isAnalyzing || isVoiceProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
-              {isRecording ? <X size={24} /> : <Mic size={24} />}
-              <span className="font-bold text-lg">
-                {isRecording ? '点击停止录音' : isVoiceProcessing ? '正在转录...' : '语音录入纪要'}
-              </span>
+              <div className="flex items-center gap-3">
+                {isCurrentlyRecording ? <X size={24} /> : <Mic size={24} />}
+                <span className="font-bold text-lg">
+                  {isCurrentlyRecording ? '点击停止录音' : isVoiceProcessing ? '正在转录...' : '语音录入纪要'}
+                </span>
+              </div>
+              {isSpeechSupported && !isCurrentlyRecording && (
+                <span className="text-xs text-green-600 font-medium">✓ 免费语音识别已启用</span>
+              )}
             </button>
             <button 
               onClick={() => fileInputRef.current?.click()}
