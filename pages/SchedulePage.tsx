@@ -21,6 +21,7 @@ import {
 import { parseScheduleVoice, transcribeAudio } from '../services/geminiService';
 import { useAudioRecorder, blobToBase64 } from '../hooks/useAudioRecorder';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
+import { parseScheduleLocally } from '../utils/scheduleParser';
 
 interface Props {
   schedules: Schedule[];
@@ -33,6 +34,7 @@ const SchedulePage: React.FC<Props> = ({ schedules, customers, onAddSchedule, on
   const [isProcessing, setIsProcessing] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newSchedule, setNewSchedule] = useState({ title: '', date: '', time: '', customerId: '' });
+  const [recognizedText, setRecognizedText] = useState('');
   
   // 使用录音 Hook（MediaRecorder + Gemini API）
   const { isRecording, startRecording, stopRecording } = useAudioRecorder();
@@ -60,25 +62,34 @@ const SchedulePage: React.FC<Props> = ({ schedules, customers, onAddSchedule, on
         // 停止监听并处理识别的文本
         stopListening();
         if (transcript) {
+          setRecognizedText(transcript); // 显示识别的文本
           setIsProcessing(true);
           try {
-            const result = await parseScheduleVoice(transcript);
-            if (result) {
+            // 尝试使用本地解析器（无需 API Key）
+            const localResult = parseScheduleLocally(transcript);
+            
+            if (localResult) {
               // 尝试匹配客户
-              const matchedCust = customers.find(c => 
-                c.name.includes(result.customerName) || c.company.includes(result.customerName)
-              );
+              const matchedCust = localResult.customerName 
+                ? customers.find(c => 
+                    c.name.includes(localResult.customerName!) || 
+                    c.company.includes(localResult.customerName!)
+                  )
+                : undefined;
               
               const schedule: Schedule = {
                 id: 'sched-' + Date.now(),
-                title: result.title,
-                date: result.date,
-                time: result.time,
-                description: result.description,
+                title: localResult.title,
+                date: localResult.date,
+                time: localResult.time,
+                description: localResult.description,
                 customerId: matchedCust?.id,
                 status: 'pending'
               };
               onAddSchedule(schedule);
+              
+              // 清空识别文本
+              setTimeout(() => setRecognizedText(''), 2000);
             }
           } catch (err) {
             console.error('语音处理失败:', err);
@@ -88,6 +99,7 @@ const SchedulePage: React.FC<Props> = ({ schedules, customers, onAddSchedule, on
         }
       } else {
         // 开始监听
+        setRecognizedText(''); // 清空之前的文本
         startListening();
       }
       return;
@@ -166,31 +178,49 @@ const SchedulePage: React.FC<Props> = ({ schedules, customers, onAddSchedule, on
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-4">
-          <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl">
-                <Sparkles size={24} />
+          <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="p-6 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl">
+                  <Sparkles size={24} />
+                </div>
+                <div>
+                  <h4 className="font-bold text-gray-900">语音智能录入</h4>
+                  <p className="text-sm text-gray-500">只需说出"明天下午两点和张总开会"</p>
+                </div>
               </div>
-              <div>
-                <h4 className="font-bold text-gray-900">语音智能录入</h4>
-                <p className="text-sm text-gray-500">只需说出“明天下午两点和张总开会”</p>
+              <div className="flex flex-col items-end gap-2">
+                <button 
+                  onClick={startVoiceInput}
+                  disabled={isProcessing}
+                  className={`flex items-center gap-3 px-6 py-3 rounded-2xl font-bold transition-all ${
+                    isCurrentlyRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-blue-600 text-white hover:bg-blue-700'
+                  } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {isProcessing ? <Loader2 className="animate-spin" size={20} /> : isCurrentlyRecording ? <X size={20} /> : <Mic size={20} />}
+                  {isProcessing ? '正在处理...' : isCurrentlyRecording ? '点击停止' : '开始说话'}
+                </button>
+                {isSpeechSupported && !isCurrentlyRecording && (
+                  <span className="text-xs text-green-600 font-medium">✓ 免费语音识别</span>
+                )}
               </div>
             </div>
-            <div className="flex flex-col items-end gap-2">
-              <button 
-                onClick={startVoiceInput}
-                disabled={isProcessing}
-                className={`flex items-center gap-3 px-6 py-3 rounded-2xl font-bold transition-all ${
-                  isCurrentlyRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-blue-600 text-white hover:bg-blue-700'
-                } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-                {isProcessing ? <Loader2 className="animate-spin" size={20} /> : isCurrentlyRecording ? <X size={20} /> : <Mic size={20} />}
-                {isProcessing ? '正在处理...' : isCurrentlyRecording ? '点击停止' : '开始说话'}
-              </button>
-              {isSpeechSupported && !isCurrentlyRecording && (
-                <span className="text-xs text-green-600 font-medium">✓ 免费语音识别</span>
-              )}
-            </div>
+            
+            {/* 显示实时识别的文字或已识别的文字 */}
+            {(isListening && transcript) || recognizedText ? (
+              <div className="px-6 pb-6">
+                <div className={`p-4 rounded-xl ${isListening ? 'bg-red-50 border-2 border-red-200' : 'bg-green-50 border-2 border-green-200'}`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-xs font-bold uppercase tracking-wider">
+                      {isListening ? '🎤 正在识别...' : '✅ 识别完成'}
+                    </span>
+                  </div>
+                  <p className="text-gray-900 font-medium">
+                    {isListening ? transcript : recognizedText}
+                  </p>
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div className="space-y-4">
